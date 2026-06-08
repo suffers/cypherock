@@ -1,132 +1,139 @@
-# Vulnerability Report: Unauthenticated Customer Name Disclosure via /api/reviews/all
+# Security Disclosure: Cypherock Web Application Vulnerabilities
 
-## Overview
+> **Status: Pending Resolution via Cypherock Team**
+>
+> These findings have been reported to Cypherock's security team per their [responsible disclosure policy](https://www.cypherock.com/bug-bounty). Specific technical details, payloads, and exploitation steps are intentionally withheld until remediation is confirmed.
 
-| Field | Value |
-|-------|-------|
-| **Target** | https://www.cypherock.com |
-| **Endpoint** | `GET /api/reviews/all` |
+---
+
+## Summary
+
+During an authorized security assessment of `cypherock.com`, multiple vulnerabilities were identified in the web application's API layer. These findings collectively enable the enumeration of real customer identities — individuals who have purchased Cypherock hardware wallets and are confirmed cryptocurrency holders.
+
+**No vulnerabilities were found in the X1 hardware wallet or X1 cards themselves.**
+
+---
+
+## Findings Overview
+
+### CYPH-01: Customer Identity Disclosure (Unmasked)
+
+| Field | Detail |
+|-------|--------|
 | **Severity** | High |
-| **Category** | Sensitive data leaks leading to funds loss (Bounty Scope #6) |
-| **Authentication Required** | None |
-| **Rate Limiting** | None |
-| **Status** | Active |
+| **Type** | Information Disclosure |
+| **CWE** | CWE-200: Exposure of Sensitive Information to an Unauthorized Actor |
+| **Auth Required** | None |
+| **Status** | Pending Resolution |
+
+An unauthenticated API endpoint returns **complete, unmasked real names** of Cypherock customers along with associated user-generated content. No rate limiting is applied.
 
 ---
 
-## Description
+### CYPH-02: Customer Identity Disclosure (Partially Masked)
 
-The Cypherock website exposes an API endpoint at `/api/reviews/all` that returns **fully unmasked customer names** along with their review text. Unlike the `/api/purchasers.json` endpoint which applies partial character masking, this endpoint returns **complete, unredacted real names** of Cypherock hardware wallet purchasers.
+| Field | Detail |
+|-------|--------|
+| **Severity** | Medium |
+| **Type** | Information Disclosure |
+| **CWE** | CWE-200: Exposure of Sensitive Information to an Unauthorized Actor |
+| **Auth Required** | None |
+| **Status** | Pending Resolution |
 
-This is particularly dangerous because:
-1. The names are **completely unmasked** — no character replacement
-2. The data confirms these individuals are **cryptocurrency hardware wallet owners** (high-value targets)
-3. No authentication, session, or CSRF token is required
-4. No rate limiting is applied
+A second unauthenticated API endpoint returns partially masked customer names and geographic locations. The masking implementation preserves the exact character length of the original name, significantly reducing the search space for de-anonymization. Each request returns a randomized subset from a pool of approximately 500-1000+ customer records.
+
+Additionally, a subset of this same data is embedded in the client-side JavaScript of **every page** on the site (including error pages), serving as "social proof" purchase notifications.
 
 ---
 
-## Reproduction Steps
+### CYPH-03: User Email Enumeration Oracle
 
-### Step 1: Send GET Request
+| Field | Detail |
+|-------|--------|
+| **Severity** | Medium |
+| **Type** | Information Disclosure / Authentication Weakness |
+| **CWE** | CWE-204: Observable Response Discrepancy |
+| **Auth Required** | None |
+| **Status** | Pending Resolution |
 
-```http
-GET /api/reviews/all HTTP/1.1
-Host: www.cypherock.com
-Accept: application/json
+An unauthenticated API endpoint accepts an email address and returns a differential response indicating whether the email is registered in the Cypherock system. This allows bulk verification of email addresses against the Cypherock user base with no rate limiting.
+
+---
+
+### CYPH-04: Payment Provider Key Exposure
+
+| Field | Detail |
+|-------|--------|
+| **Severity** | Low |
+| **Type** | Sensitive Data Exposure |
+| **CWE** | CWE-312: Cleartext Storage of Sensitive Information |
+| **Auth Required** | None |
+| **Status** | Pending Resolution |
+
+A client-side JavaScript bundle contains a live payment provider API key. While this specific key type is designed for client-side use, its exposure alongside other findings enables construction of convincing phishing infrastructure.
+
+---
+
+### CYPH-05: Third-Party Service Identifier Exposure
+
+| Field | Detail |
+|-------|--------|
+| **Severity** | Informational |
+| **Type** | Information Disclosure |
+| **Auth Required** | None |
+| **Status** | Noted |
+
+Multiple third-party analytics, session recording, and marketing service identifiers are embedded in the site source. These enable event injection and session replay manipulation.
+
+---
+
+## Combined Risk Assessment
+
+These findings are most dangerous **in combination**:
+
+```
+CYPH-01 (full names) + CYPH-02 (names + countries) + CYPH-03 (email verification)
+    = Complete identity records of confirmed cryptocurrency holders
+        = High-value spear-phishing target list
+            = Potential seed phrase harvesting
+                = Funds loss
 ```
 
-**cURL:**
-```bash
-curl -s "https://www.cypherock.com/api/reviews/all" \
-  -H "Accept: application/json"
-```
-
-### Step 2: Receive Unmasked Customer Data
-
-The response contains an array of review objects with **fully unmasked** customer names:
-
-```json
-[
-  {
-    "name": "[REDACTED — Full real name returned]",
-    "review": "...",
-    "rating": 5
-  },
-  ...
-]
-```
-
-**Key difference from `/api/purchasers.json`:**
-
-| Endpoint | Masking | Example |
-|----------|---------|---------|
-| `/api/purchasers.json` | Partial masking | `Da*** Bri****` |
-| **`/api/reviews/all`** | **No masking** | **`David Britten`** (full name) |
+This attack chain falls within Cypherock's bounty scope item #6: *"Sensitive data leaks leading to funds loss."*
 
 ---
 
-## Impact
+## What Is NOT Affected
 
-### Direct Impact
-- **Full real names** of confirmed cryptocurrency hardware wallet purchasers are exposed
-- **Review content** may reveal additional personal context (use case, location, wallet type)
-- Data is accessible to any unauthenticated user or automated scraper
+- X1 Hardware Wallet firmware
+- X1 Card cryptographic operations
+- Seed phrase generation or storage
+- Device-to-device communication protocols
+- Shamir Secret Sharing implementation
 
-### Attack Chain → Funds Loss
-1. **Enumerate** all customer names via `/api/reviews/all` (full names, no guessing needed)
-2. **Cross-reference** with social media, LinkedIn, public records to build target profiles
-3. **Launch targeted spear-phishing**: "Dear [Full Name], your Cypherock X1 requires an urgent firmware update. Please connect your device and enter your recovery phrase at [malicious-url]"
-4. **Harvest seed phrases** → drain cryptocurrency wallets → **funds loss**
-
-Hardware wallet customers are **uniquely high-value targets** because:
-- They are confirmed cryptocurrency holders
-- They likely hold significant amounts (invested in premium hardware security)
-- They trust the Cypherock brand — a phishing email referencing their exact product is highly convincing
-
-### Amplification with Other Findings
-- Combined with `/api/purchasers.json` (which includes country data), attackers can geo-locate victims
-- Combined with `/api/affiliates/check-email`, attackers can verify victim email addresses
-- Combined with the exposed Stripe publishable key, attackers can build convincing fake checkout/refund pages
+All findings are limited to the **web application and its API layer**.
 
 ---
 
-## Affected Data
-
-| Data Field | Exposed | Masked |
-|------------|---------|--------|
-| Customer first name | Yes | **No** |
-| Customer last name | Yes | **No** |
-| Review text | Yes | N/A |
-| Star rating | Yes | N/A |
-
----
-
-## Recommended Remediation
-
-1. **Immediate**: Remove the `/api/reviews/all` endpoint or require authentication
-2. **If reviews must be public**: Apply consistent masking (e.g., `D**** B******`) — matching `/api/purchasers.json` behavior at minimum
-3. **Better**: Use pseudonyms or initials only (e.g., "D.B." or "Verified Buyer")
-4. **Add rate limiting** to all `/api/*` endpoints
-5. **Add Cloudflare WAF rules** to block automated scraping of API endpoints
-
----
-
-## Bounty Eligibility
-
-This finding falls under Cypherock Bug Bounty scope item **#6: "Sensitive data leaks leading to funds loss"**:
-
-- **Sensitive data**: Full real names of confirmed cryptocurrency holders — YES
-- **Leading to funds loss**: Enables targeted phishing campaigns against identified wallet owners — YES
-- **Ease of exploit**: Single unauthenticated GET request — TRIVIAL
-- **Risk to users**: Confirmed crypto holders become spear-phishing targets — CRITICAL
-
----
-
-## Timeline
+## Disclosure Timeline
 
 | Date | Event |
 |------|-------|
-| [DATE] | Vulnerability discovered during authorized security assessment |
-| [DATE] | Report submitted to security@cypherock.com |
-| | Awaiting acknowledgment |
+| 2026-06-XX | Vulnerabilities discovered during authorized assessment |
+| 2026-06-XX | Initial report submitted to security@cypherock.com |
+| — | Awaiting acknowledgment from Cypherock security team |
+| — | 90-day disclosure window per Cypherock policy |
+
+This disclosure follows Cypherock's [Bug Bounty Program](https://www.cypherock.com/bug-bounty) guidelines. Public technical details will not be released until:
+1. Cypherock confirms remediation, **OR**
+2. The 90-day disclosure window expires
+
+---
+
+## Researcher
+
+[Your Name / Handle]
+
+---
+
+> **Note:** If you are a Cypherock customer concerned about your data exposure, contact Cypherock support directly. Do not attempt to access, test, or exploit any of the endpoints referenced in this disclosure.
