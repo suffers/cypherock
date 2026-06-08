@@ -132,7 +132,7 @@ This disclosure follows Cypherock's [Bug Bounty Program](https://www.cypherock.c
 
 ## Researcher
 
-[Your Name / Handle]
+J (@suffers)
 
 ---
 
